@@ -14,11 +14,12 @@ def setup_bot():
     intents.message_content = True
     intents.members = True
     
-    # Create bot instance with command prefix and intents
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    # Create bot instance with a prefix that won't be used (we'll only use slash commands)
+    bot = commands.Bot(command_prefix="/", intents=intents)
     
-    # Add log channel ID to bot for shared access across cogs
-    bot.log_channel_id = 1299929217328349234
+    # Add channel IDs to bot for shared access across cogs
+    bot.log_channel_id = 1299929217328349234  # Канал для логов операций с ключами
+    bot.status_channel_id = 1363695347699810515  # Канал для сообщений о статусе бота
     
     @bot.event
     async def on_ready():
@@ -41,10 +42,10 @@ def setup_bot():
             name="premium keys"
         ))
         
-        # Send startup message to log channel
+        # Send startup message to status channel
         try:
-            log_channel = bot.get_channel(bot.log_channel_id)
-            if log_channel:
+            status_channel = bot.get_channel(bot.status_channel_id)
+            if status_channel:
                 startup_embed = discord.Embed(
                     title="🤖 Bot Online",
                     description="Premium key management bot is now online and ready to use!",
@@ -52,10 +53,10 @@ def setup_bot():
                     timestamp=datetime.now()
                 )
                 startup_embed.set_footer(text=f"Bot ID: {bot.user.id}")
-                await log_channel.send(embed=startup_embed)
-                logger.info(f"Sent startup message to log channel {bot.log_channel_id}")
+                await status_channel.send(embed=startup_embed)
+                logger.info(f"Sent startup message to status channel {bot.status_channel_id}")
             else:
-                logger.warning(f"Log channel with ID {bot.log_channel_id} not found")
+                logger.warning(f"Status channel with ID {bot.status_channel_id} not found")
         except Exception as e:
             logger.error(f"Error sending startup message: {e}")
 

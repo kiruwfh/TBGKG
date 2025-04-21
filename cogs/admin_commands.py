@@ -131,9 +131,8 @@ class AdminCommands(commands.Cog):
                         expiry_emoji = "📅"
                     
                     embed.add_field(
-                        name=f"{status_emoji} Key: `{key[:8]}...{key[-8:]}`",
-                        value=f"📋 **ID:** `{key}`\n"
-                              f"👤 **Created by:** {creator}\n"
+                        name=f"{status_emoji} Key: `{key}`",
+                        value=f"👤 **Created by:** {creator}\n"
                               f"👑 **Status:** {redeemer}\n"
                               f"⏱️ **Duration:** `{duration_str}`\n"
                               f"{expiry_emoji} **Expires:** {expiry_text}\n"
@@ -182,15 +181,38 @@ class AdminCommands(commands.Cog):
         # Get key data
         key = key.strip()  # Remove any whitespace
         key_data = self.keys_db.get_key(key)
+        
+        # Проверим, был ли ключ ранее в базе данных, но истек и был удален
+        all_keys = self.keys_db.keys
+        expired_keys = self.keys_db.get_expired_keys()
+        expired_key_ids = [k.get('key') for k in expired_keys]
+        
         if not key_data:
-            error_embed = build_embed(
-                title="❌ Key Not Found",
-                description=f"The key `{key[:8]}...{key[-8:] if len(key) > 16 else key}` does not exist in the database.",
-                color=discord.Color.red(),
-                footer={
-                    'text': 'Make sure you entered the key correctly'
-                }
-            )
+            if key in expired_key_ids:
+                error_embed = build_embed(
+                    title="⌛ Key Expired",
+                    description=f"The key `{key}` has expired and is no longer active.",
+                    color=discord.Color.orange(),
+                    fields=[
+                        {
+                            'name': '❓ What happened?',
+                            'value': "This key has expired and has been removed from active keys. It can no longer be used.",
+                            'inline': False
+                        }
+                    ],
+                    footer={
+                        'text': 'You can generate a new key if needed'
+                    }
+                )
+            else:
+                error_embed = build_embed(
+                    title="❌ Key Not Found",
+                    description=f"The key `{key}` does not exist in the database.",
+                    color=discord.Color.red(),
+                    footer={
+                        'text': 'Make sure you entered the key correctly'
+                    }
+                )
             await interaction.followup.send(embed=error_embed, ephemeral=True)
             
             # Log to channel
@@ -316,12 +338,48 @@ class AdminCommands(commands.Cog):
                             # Update key duration
                             self.view.cog.keys_db.update_key_duration(key, duration_seconds, new_expiry_date)
                             
-                            # Sync to database
+                            # Save keys to file
+                            self.view.cog.keys_db.save_keys()
+                            
+                            # Отправляем лог об изменении ключа в канал логов
                             try:
-                                from utils.sync_keys import sync_db_to_json
-                                sync_db_to_json()
+                                log_channel = self.view.cog.bot.get_channel(self.view.cog.bot.log_channel_id)
+                                if log_channel:
+                                    log_embed = build_embed(
+                                        title="🔄 Key Duration Modified",
+                                        description=f"An admin has modified a premium key's duration.",
+                                        color=discord.Color.yellow(),
+                                        fields=[
+                                            {
+                                                'name': '👤 Modified By',
+                                                'value': f"{modal_interaction.user.mention} (`{modal_interaction.user.name}` ID: `{modal_interaction.user.id}`)",
+                                                'inline': False
+                                            },
+                                            {
+                                                'name': '🔑 Key',
+                                                'value': f"`{key}`",
+                                                'inline': False
+                                            },
+                                            {
+                                                'name': '⏱️ New Duration',
+                                                'value': f"`{format_duration(duration_seconds)}`",
+                                                'inline': True
+                                            },
+                                            {
+                                                'name': '📅 New Expiry Date',
+                                                'value': f"`{format_timestamp(new_expiry_date)}`",
+                                                'inline': True
+                                            }
+                                        ],
+                                        footer={
+                                            'text': f'Server: {modal_interaction.guild.name}',
+                                            'icon_url': modal_interaction.guild.icon.url if modal_interaction.guild.icon else None
+                                        },
+                                        timestamp=datetime.now()
+                                    )
+                                    await log_channel.send(embed=log_embed)
                             except Exception as e:
-                                logger.error(f"Error syncing to database: {e}")
+                                logger.error(f"Error sending key modification log: {e}")
                             
                             # Update user's premium role expiry if the key is redeemed
                             redeemer_id = self.view.key_data.get('user_id_redeemed')
@@ -401,50 +459,95 @@ class AdminCommands(commands.Cog):
                         # Delete key from database
                         self.parent_view.cog.keys_db.delete_key(key)
                         
-                        # Sync to database
-                        try:
-                            from utils.sync_keys import sync_db_to_json
-                            sync_db_to_json()
-                        except Exception as e:
-                            logger.error(f"Error syncing to database: {e}")
+                        # Save keys to file
+                        self.parent_view.cog.keys_db.save_keys()
                         
-                        # If key was redeemed, remove premium role from user
+                        # Отправляем лог об удалении ключа в канал логов
+                        try:
+                            log_channel = self.parent_view.cog.bot.get_channel(self.parent_view.cog.bot.log_channel_id)
+                            if log_channel:
+                                log_embed = build_embed(
+                                    title="❌ Key Deleted",
+                                    description=f"An admin has deleted a premium key.",
+                                    color=discord.Color.red(),
+                                    fields=[
+                                        {
+                                            'name': '👤 Deleted By',
+                                            'value': f"{confirm_interaction.user.mention} (`{confirm_interaction.user.name}` ID: `{confirm_interaction.user.id}`)",
+                                            'inline': False
+                                        },
+                                        {
+                                            'name': '🔑 Key',
+                                            'value': f"`{key}`",
+                                            'inline': False
+                                        }
+                                    ],
+                                    footer={
+                                        'text': f'Server: {confirm_interaction.guild.name}',
+                                        'icon_url': confirm_interaction.guild.icon.url if confirm_interaction.guild.icon else None
+                                    },
+                                    timestamp=datetime.now()
+                                )
+                                
+                                # Добавляем информацию о пользователе, если ключ был использован
+                                if redeemer_id:
+                                    log_embed.add_field(
+                                        name='👤 Redeemed By',
+                                        value=f"<@{redeemer_id}> (ID: `{redeemer_id}`)",
+                                        inline=True
+                                    )
+                                
+                                await log_channel.send(embed=log_embed)
+                        except Exception as e:
+                            logger.error(f"Error sending key deletion log: {e}")
+                        
+                        # Инициализируем переменную на случай, если ключ не был погашен
+                        has_other_active_keys = False
+                        
+                        # If key was redeemed, проверяем наличие других активных ключей перед удалением роли
                         if redeemer_id:
-                            for guild in self.parent_view.cog.bot.guilds:
-                                member = guild.get_member(redeemer_id)
-                                if not member:
-                                    continue
-                                
-                                premium_role = guild.get_role(self.parent_view.cog.premium_role_id)
-                                if not premium_role or premium_role not in member.roles:
-                                    continue
-                                
-                                try:
-                                    await member.remove_roles(premium_role)
-                                    # Send notification to user
+                            # Проверяем, есть ли у пользователя другие активные ключи
+                            has_other_active_keys = self.parent_view.cog.keys_db.has_active_keys(redeemer_id)
+                            
+                            # Если нет других активных ключей, удаляем роль
+                            if not has_other_active_keys:
+                                for guild in self.parent_view.cog.bot.guilds:
+                                    member = guild.get_member(redeemer_id)
+                                    if not member:
+                                        continue
+                                    
+                                    premium_role = guild.get_role(self.parent_view.cog.premium_role_id)
+                                    if not premium_role or premium_role not in member.roles:
+                                        continue
+                                    
                                     try:
-                                        notify_embed = build_embed(
-                                            title="⛔ Premium Role Removed",
-                                            description="Your premium role has been removed by an administrator.",
-                                            color=discord.Color.red(),
-                                            fields=[
-                                                {
-                                                    'name': '🔄 Want Premium Again?',
-                                                    'value': "Contact a server administrator to get a new premium key."
-                                                }
-                                            ],
-                                            footer={
-                                                'text': 'Thank you for being a premium member!'
-                                            },
-                                            timestamp=datetime.now()
-                                        )
-                                        await member.send(embed=notify_embed)
-                                        logger.info(f"Sent premium removal notification to {member.name} (ID: {member.id})")
-                                    except discord.Forbidden:
-                                        # Can't send DM to user
-                                        logger.warning(f"Could not send premium removal DM to {member.name} (ID: {member.id})")
-                                except Exception as e:
-                                    logger.error(f"Error removing premium role: {e}")
+                                        # Удаляем роль
+                                        await member.remove_roles(premium_role)
+                                        
+                                        # Send notification to user
+                                        try:
+                                            notify_embed = build_embed(
+                                                title="⛔ Premium Role Removed",
+                                                description="Your premium role has been removed by an administrator.",
+                                                color=discord.Color.red(),
+                                                fields=[
+                                                    {
+                                                        'name': '🔄 Want Premium Again?',
+                                                        'value': "Contact a server administrator to get a new premium key."
+                                                    }
+                                                ],
+                                                footer={
+                                                    'text': 'Thank you for being a premium member!'
+                                                },
+                                                timestamp=datetime.now()
+                                            )
+                                            await member.send(embed=notify_embed)
+                                            logger.info(f"Sent premium removal notification to {member.name} (ID: {member.id})")
+                                        except discord.Forbidden:
+                                            # Can't send DM to user
+                                            logger.warning(f"Could not send premium removal DM to {member.name} (ID: {member.id})")
+                                    except Exception as e:
+                                        logger.error(f"Error removing premium role: {e}")
                         
                         # Create success message
                         success_embed = build_embed(
@@ -467,11 +570,18 @@ class AdminCommands(commands.Cog):
                         
                         # Add info about role removal if applicable
                         if redeemer_id:
-                            success_embed.add_field(
-                                name="👑 Role Removed",
-                                value=f"Premium role has been removed from <@{redeemer_id}>.",
-                                inline=False
-                            )
+                            if not has_other_active_keys:
+                                success_embed.add_field(
+                                    name="👑 Role Removed",
+                                    value=f"Premium role has been removed from <@{redeemer_id}> as they have no other active keys.",
+                                    inline=False
+                                )
+                            else:
+                                success_embed.add_field(
+                                    name="👑 Role Preserved",
+                                    value=f"Premium role for <@{redeemer_id}> was preserved as they have other active keys.",
+                                    inline=False
+                                )
                             
                         logger.info(f"Admin {confirm_interaction.user.name} (ID: {confirm_interaction.user.id}) deleted key {key}")
                         

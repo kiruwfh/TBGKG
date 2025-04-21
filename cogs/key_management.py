@@ -31,17 +31,35 @@ class KeyManagement(commands.Cog):
         except Exception as e:
             logger.error(f"Error sending log to channel: {e}")
     
-    @app_commands.command(name="generate", description="Generate a premium role key with specified duration")
-    @app_commands.describe(duration="Duration format: 1d, 7d, 1w, 1m, etc.")
+    @app_commands.command(name="generate", description="Generate premium role keys with specified duration")
+    @app_commands.describe(
+        duration="Duration format: 1d, 7d, 1w, 1m, 1w3d, etc.",
+        quantity="Number of keys to generate (default: 1, max: 10)"
+    )
     @app_commands.default_permissions(manage_roles=True)
-    async def generate_key(self, interaction: discord.Interaction, duration: str):
-        """Generate a new premium key with the specified duration."""
-        # Importing here to avoid circular imports
-        try:
-            from utils.sync_keys import sync_db_to_json
-        except ImportError:
-            pass
+    async def generate_key(self, interaction: discord.Interaction, duration: str, quantity: int = 1):
+        """Generate one or multiple premium keys with the specified duration."""
+        # Defer response
         await interaction.response.defer(ephemeral=True)
+        
+        # Ограничение количества ключей
+        if quantity <= 0:
+            error_embed = build_embed(
+                title="❌ Invalid Quantity",
+                description="Quantity must be positive.",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
+            return
+            
+        if quantity > 10:
+            error_embed = build_embed(
+                title="❌ Maximum Exceeded",
+                description="You can generate a maximum of 10 keys at once.",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
+            return
         
         # Parse duration string
         try:
@@ -65,85 +83,19 @@ class KeyManagement(commands.Cog):
             await interaction.followup.send(embed=error_embed, ephemeral=True)
             return
         
-        # Generate unique key
-        key = str(uuid.uuid4())
-        
-        # Store key in database
-        self.keys_db.add_key(key, duration_seconds, expiry_date, interaction.user.id, None)
-        
-        # Sync to database
-        try:
-            from utils.sync_keys import sync_db_to_json
-            sync_db_to_json()
-        except Exception as e:
-            logger.error(f"Error syncing to database: {e}")
-        
-        # Calculate exact expiration time and relative time
+        # Генерируем несколько ключей
+        generated_keys = []
         now = datetime.now()
-        time_until_expiry = expiry_date - now
-        days = time_until_expiry.days
-        hours = time_until_expiry.seconds // 3600
-        minutes = (time_until_expiry.seconds // 60) % 60
         
-        # Format relative time description
-        relative_time = []
-        if days > 0:
-            relative_time.append(f"{days} {'day' if days == 1 else 'days'}")
-        if hours > 0 or days > 0:
-            relative_time.append(f"{hours} {'hour' if hours == 1 else 'hours'}")
-        if minutes > 0 or hours > 0 or days > 0:
-            relative_time.append(f"{minutes} {'minute' if minutes == 1 else 'minutes'}")
-        
-        relative_time_str = ", ".join(relative_time)
-        
-        # Create and send embed to user via DM with improved visual appearance
-        key_embed = build_embed(
-            title="🔑 Premium Key Generated",
-            description=f"You have successfully generated a premium key!\nShare this key with someone to give them premium access.",
-            color=discord.Color.gold(),
-            fields=[
-                {
-                    'name': '🔐 Key',
-                    'value': f"```{key}```\n*This is the full key that needs to be entered*",
-                    'inline': False
-                },
-                {
-                    'name': '⏱️ Duration',
-                    'value': f"`{format_duration(duration_seconds)}` ({relative_time_str})",
-                    'inline': False
-                },
-                {
-                    'name': '📅 Valid Until',
-                    'value': f"`{format_timestamp(expiry_date)}`",
-                    'inline': True
-                },
-                {
-                    'name': '🕑 Generated At',
-                    'value': f"`{format_timestamp(now)}`",
-                    'inline': True
-                },
-                {
-                    'name': '📋 How to Redeem',
-                    'value': "Use the `/redeem` command in the server and enter this key when prompted.",
-                    'inline': False
-                }
-            ],
-            footer={
-                'text': f'Generated by {interaction.user.display_name}',
-                'icon_url': interaction.user.display_avatar.url
-            },
-            timestamp=datetime.now()
-        )
-        
-        confirmation_embed = build_embed(
-            title="✅ Key Generated Successfully",
-            description="A premium key has been generated and sent to your DMs!",
-            color=discord.Color.green()
-        )
-        
-        try:
-            await interaction.user.send(embed=key_embed)
-            await interaction.followup.send(embed=confirmation_embed, ephemeral=True)
+        for _ in range(quantity):
+            # Generate unique key
+            key = str(uuid.uuid4())
+            generated_keys.append(key)
+            
+            # Store key in database
+            self.keys_db.add_key(key, duration_seconds, expiry_date, interaction.user.id, None)
+            
+            # Log key generation in the system
             logger.info(f"User {interaction.user.name} (ID: {interaction.user.id}) generated a premium key: {key}")
             
             # Log key generation to the log channel
@@ -180,15 +132,247 @@ class KeyManagement(commands.Cog):
                 timestamp=datetime.now()
             )
             await self.log_to_channel(log_embed)
+        
+        # Save keys to file after generating all keys
+        self.keys_db.save_keys()
+        
+        # Calculate exact expiration time and relative time
+        time_until_expiry = expiry_date - now
+        days = time_until_expiry.days
+        hours = time_until_expiry.seconds // 3600
+        minutes = (time_until_expiry.seconds // 60) % 60
+        
+        # Format relative time description
+        relative_time = []
+        if days > 0:
+            relative_time.append(f"{days} {'day' if days == 1 else 'days'}")
+        if hours > 0 or days > 0:
+            relative_time.append(f"{hours} {'hour' if hours == 1 else 'hours'}")
+        if minutes > 0 or hours > 0 or days > 0:
+            relative_time.append(f"{minutes} {'minute' if minutes == 1 else 'minutes'}")
+        
+        relative_time_str = ", ".join(relative_time)
+        
+        # Create multiple embeds for keys (one per key)
+        key_embeds = []
+        for i, key in enumerate(generated_keys):
+            key_embed = build_embed(
+                title=f"🔑 Premium Key {i+1}/{quantity} Generated",
+                description=f"You have successfully generated a premium key!\nShare this key with someone to give them premium access.",
+                color=discord.Color.gold(),
+                fields=[
+                    {
+                        'name': '🔐 Key',
+                        'value': f"```{key}```\n*This is the full key that needs to be entered*",
+                        'inline': False
+                    },
+                    {
+                        'name': '⏱️ Duration',
+                        'value': f"`{format_duration(duration_seconds)}` ({relative_time_str})",
+                        'inline': False
+                    },
+                    {
+                        'name': '📅 Valid Until',
+                        'value': f"`{format_timestamp(expiry_date)}`",
+                        'inline': True
+                    },
+                    {
+                        'name': '🕑 Generated At',
+                        'value': f"`{format_timestamp(now)}`",
+                        'inline': True
+                    },
+                    {
+                        'name': '📋 How to Redeem',
+                        'value': "Use the `/redeem` command in the server and enter this key when prompted.",
+                        'inline': False
+                    }
+                ],
+                footer={
+                    'text': f'Generated by {interaction.user.display_name}',
+                    'icon_url': interaction.user.display_avatar.url
+                },
+                timestamp=datetime.now()
+            )
+            key_embeds.append(key_embed)
+        
+        # Create summary confirmation embed
+        confirmation_embed = build_embed(
+            title="✅ Keys Generated Successfully",
+            description=f"{quantity} premium {'key has' if quantity == 1 else 'keys have'} been generated and sent to your DMs!",
+            color=discord.Color.green(),
+            fields=[
+                {
+                    'name': '⏱️ Duration',
+                    'value': f"`{format_duration(duration_seconds)}` ({relative_time_str})",
+                    'inline': True
+                },
+                {
+                    'name': '📅 Valid Until',
+                    'value': f"`{format_timestamp(expiry_date)}`",
+                    'inline': True
+                }
+            ]
+        )
+        
+        try:
+            # Send each key as a separate message
+            for embed in key_embeds:
+                await interaction.user.send(embed=embed)
+            
+            await interaction.followup.send(embed=confirmation_embed, ephemeral=True)
             
         except discord.Forbidden:
-            # If we can't DM the user, show the key in the channel response
+            # If we can't DM the user, show a message with error
             error_note = build_embed(
                 title="⚠️ DM Error",
-                description="I couldn't send you a DM. Here's your key (only visible to you):",
+                description="I couldn't send you a DM. Your keys are only visible to you in this channel:",
                 color=discord.Color.yellow()
             )
-            await interaction.followup.send(embeds=[error_note, key_embed], ephemeral=True)
+            
+            # If more than 1 key, we can only show the first key with the error note
+            if len(key_embeds) == 1:
+                await interaction.followup.send(embeds=[error_note, key_embeds[0]], ephemeral=True)
+            else:
+                # Create a compressed view of all keys
+                all_keys_embed = build_embed(
+                    title=f"🔑 {quantity} Premium Keys Generated",
+                    description="You have successfully generated multiple premium keys!\n**Here are all your generated keys:**",
+                    color=discord.Color.gold(),
+                    timestamp=datetime.now()
+                )
+                
+                # Add each key as a field
+                for i, key in enumerate(generated_keys):
+                    all_keys_embed.add_field(
+                        name=f"🔐 Key {i+1}/{quantity}",
+                        value=f"```{key}```",
+                        inline=False
+                    )
+                
+                # Add duration and expiry information
+                all_keys_embed.add_field(
+                    name='⏱️ Duration',
+                    value=f"`{format_duration(duration_seconds)}` ({relative_time_str})",
+                    inline=True
+                )
+                all_keys_embed.add_field(
+                    name='📅 Valid Until',
+                    value=f"`{format_timestamp(expiry_date)}`",
+                    inline=True
+                )
+                
+                await interaction.followup.send(embeds=[error_note, all_keys_embed], ephemeral=True)
+    
+    @app_commands.command(name="mystatus", description="Check your premium subscription status")
+    async def check_premium_status(self, interaction: discord.Interaction):
+        """Command to check user's premium status and view active keys."""
+        # Defer response
+        await interaction.response.defer(ephemeral=True)
+        
+        user_id = interaction.user.id
+        user_keys = self.keys_db.get_keys_for_user(user_id)
+        has_active_keys = self.keys_db.has_active_keys(user_id)
+        
+        # Check if user has premium role
+        premium_role = None
+        for guild in self.bot.guilds:
+            member = guild.get_member(user_id)
+            if not member:
+                continue
+                
+            premium_role = guild.get_role(self.premium_role_id)
+            if premium_role and premium_role in member.roles:
+                break
+            else:
+                premium_role = None
+        
+        # Check if there's a mismatch between role and key status
+        role_mismatch = (premium_role is not None and not has_active_keys) or (premium_role is None and has_active_keys)
+        
+        # Create embed with user status
+        if has_active_keys:
+            # User has active keys
+            embed = build_embed(
+                title="✅ Premium Status Active",
+                description="You currently have an active premium subscription!",
+                color=discord.Color.green(),
+                fields=[
+                    {
+                        'name': '👑 Premium Role',
+                        'value': "You have the premium role." if premium_role else "You don't have the premium role yet. Contact an administrator if you believe this is an error.",
+                        'inline': False
+                    }
+                ],
+                footer={
+                    'text': f'Requested by {interaction.user.display_name}',
+                    'icon_url': interaction.user.display_avatar.url
+                },
+                timestamp=datetime.now()
+            )
+            
+            # Add list of active keys
+            active_keys = [k for k in user_keys if datetime.fromisoformat(k.get('expiry_date')) > datetime.now()]
+            if active_keys:
+                keys_list = ""
+                for i, key in enumerate(active_keys, 1):
+                    expiry_date = datetime.fromisoformat(key.get('expiry_date'))
+                    key_str = key.get('key')
+                    keys_list += f"**Key {i}:** Expires {format_timestamp(expiry_date)}\n`{key_str[:8]}...{key_str[-8:]}`\n\n"
+                
+                embed.add_field(
+                    name=f'🔑 Your Active Keys ({len(active_keys)})',
+                    value=keys_list or "No active keys found.",
+                    inline=False
+                )
+        else:
+            # User has no active keys
+            embed = build_embed(
+                title="❌ No Premium Subscription",
+                description="You don't currently have an active premium subscription.",
+                color=discord.Color.red(),
+                fields=[
+                    {
+                        'name': '👑 Premium Role',
+                        'value': "You still have the premium role, but it may be removed soon." if premium_role else "You don't have the premium role.",
+                        'inline': False
+                    },
+                    {
+                        'name': '🔄 How to Get Premium',
+                        'value': "Ask an administrator for a premium key, then use the `/redeem` command to activate it.",
+                        'inline': False
+                    }
+                ],
+                footer={
+                    'text': f'Requested by {interaction.user.display_name}',
+                    'icon_url': interaction.user.display_avatar.url
+                },
+                timestamp=datetime.now()
+            )
+            
+            # Check if user has expired keys
+            expired_keys = [k for k in user_keys if datetime.fromisoformat(k.get('expiry_date')) <= datetime.now()]
+            if expired_keys:
+                keys_list = ""
+                for i, key in enumerate(expired_keys, 1):
+                    expiry_date = datetime.fromisoformat(key.get('expiry_date'))
+                    key_str = key.get('key')
+                    keys_list += f"**Key {i}:** Expired on {expiry_date.strftime('%Y-%m-%d %H:%M')}\n`{key_str[:8]}...{key_str[-8:]}`\n\n"
+                
+                embed.add_field(
+                    name=f'⏰ Your Expired Keys ({len(expired_keys)})',
+                    value=keys_list or "No expired keys found.",
+                    inline=False
+                )
+        
+        # If there's a mismatch, add a warning
+        if role_mismatch:
+            embed.add_field(
+                name='⚠️ Status Mismatch Detected',
+                value="There seems to be a mismatch between your premium role and your key status. Please contact an administrator to resolve this issue.",
+                inline=False
+            )
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
     
     @app_commands.command(name="redeem", description="Redeem a premium role key")
     async def redeem_key(self, interaction: discord.Interaction):
@@ -470,12 +654,8 @@ class KeyManagement(commands.Cog):
                 # Update key with user who redeemed it
                 self.cog.keys_db.update_key_redeemed(key, modal_interaction.user.id)
                 
-                # Sync to database
-                try:
-                    from utils.sync_keys import sync_db_to_json
-                    sync_db_to_json()
-                except Exception as e:
-                    logger.error(f"Error syncing to database: {e}")
+                # Save keys to file
+                self.cog.keys_db.save_keys()
                 
                 # Add premium role to user
                 try:
@@ -631,13 +811,9 @@ class KeyManagement(commands.Cog):
         
         while not self.bot.is_closed():
             try:
-                # Sync any new keys to database
-                try:
-                    from utils.sync_keys import sync_db_to_json
-                    sync_db_to_json()
-                    logger.info("Database synchronized during scheduled check")
-                except Exception as e:
-                    logger.error(f"Error syncing keys to database: {e}")
+                # Save keys to file
+                self.keys_db.save_keys()
+                logger.info("Keys saved to file during scheduled check")
             
                 # Get all expired keys
                 expired_keys = self.keys_db.get_expired_keys()
@@ -657,10 +833,13 @@ class KeyManagement(commands.Cog):
                         if not premium_role:
                             continue
                         
-                        if premium_role in member.roles:
+                        # Проверяем, есть ли у пользователя другие активные ключи
+                        has_other_active_keys = self.keys_db.has_active_keys(user_id)
+                        
+                        if premium_role in member.roles and not has_other_active_keys:
                             try:
                                 await member.remove_roles(premium_role)
-                                logger.info(f"Removed premium role from {member.name} (ID: {member.id}) due to key expiration")
+                                logger.info(f"Removed premium role from {member.name} (ID: {member.id}) due to all keys expired")
                                 
                                 # Log key expiration to channel
                                 key = key_data.get('key', 'Unknown')
@@ -749,12 +928,8 @@ class KeyManagement(commands.Cog):
             except Exception as e:
                 logger.error(f"Error in check_expired_keys task: {e}")
             
-            # Sync again after cleanup to ensure web interface stays updated
-            try:
-                from utils.sync_keys import sync_db_to_json
-                sync_db_to_json()
-            except Exception as e:
-                logger.error(f"Error syncing keys to database after cleanup: {e}")
+            # Save keys to file after cleanup
+            self.keys_db.save_keys()
             
             # Run check every 10 minutes instead of hourly to ensure timely synchronization
             await asyncio.sleep(600)

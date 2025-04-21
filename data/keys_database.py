@@ -84,6 +84,26 @@ class KeysDatabase:
     def get_key(self, key):
         """Get a key from the database."""
         return self.keys.get(key)
+        
+    def get_keys_for_user(self, user_id):
+        """Get all keys redeemed by a specific user."""
+        user_keys = []
+        for key, data in self.keys.items():
+            if data.get('user_id_redeemed') == user_id:
+                user_keys.append(data)
+        return user_keys
+    
+    def has_active_keys(self, user_id):
+        """Check if a user has any active (non-expired) keys."""
+        now = datetime.now()
+        user_keys = self.get_keys_for_user(user_id)
+        
+        for key_data in user_keys:
+            expiry_date = key_data.get('expiry_date')
+            if expiry_date and expiry_date > now:
+                return True
+        
+        return False
     
     def update_key_redeemed(self, key, user_id_redeemed):
         """Update a key with the user who redeemed it."""
@@ -120,8 +140,21 @@ class KeysDatabase:
         active_keys = []
         
         for key, data in self.keys.items():
-            if data['expiry_date'] > now:
-                active_keys.append(data)
+            # Убедимся, что expiry_date - это объект datetime для корректного сравнения
+            expiry_date = data['expiry_date']
+            if isinstance(expiry_date, str):
+                try:
+                    expiry_date = datetime.fromisoformat(expiry_date)
+                except ValueError:
+                    continue
+            
+            if expiry_date > now:
+                # Создаем копию данных для безопасного возврата
+                key_data = data.copy()
+                # Убедимся, что expiry_date - это объект datetime
+                if isinstance(key_data['expiry_date'], str):
+                    key_data['expiry_date'] = expiry_date
+                active_keys.append(key_data)
         
         return active_keys
     
@@ -131,8 +164,21 @@ class KeysDatabase:
         expired_keys = []
         
         for key, data in self.keys.items():
-            if data['expiry_date'] <= now and data.get('user_id_redeemed'):
-                expired_keys.append(data)
+            # Убедимся, что expiry_date - это объект datetime для корректного сравнения
+            expiry_date = data['expiry_date']
+            if isinstance(expiry_date, str):
+                try:
+                    expiry_date = datetime.fromisoformat(expiry_date)
+                except ValueError:
+                    continue
+            
+            if expiry_date <= now and data.get('user_id_redeemed'):
+                # Создаем копию данных для безопасного возврата
+                key_data = data.copy()
+                # Убедимся, что expiry_date - это объект datetime
+                if isinstance(key_data['expiry_date'], str):
+                    key_data['expiry_date'] = expiry_date
+                expired_keys.append(key_data)
         
         return expired_keys
     
@@ -143,8 +189,16 @@ class KeysDatabase:
         
         for key in list(self.keys.keys()):
             data = self.keys[key]
+            # Убедимся, что expiry_date - это объект datetime для корректного сравнения
+            expiry_date = data['expiry_date']
+            if isinstance(expiry_date, str):
+                try:
+                    expiry_date = datetime.fromisoformat(expiry_date)
+                except ValueError:
+                    continue
+                    
             # Keep keys that haven't expired or haven't been redeemed
-            if data['expiry_date'] <= now and data.get('user_id_redeemed'):
+            if expiry_date <= now and data.get('user_id_redeemed'):
                 expired_keys.append(key)
         
         # Don't actually delete expired keys, just track them for reporting
