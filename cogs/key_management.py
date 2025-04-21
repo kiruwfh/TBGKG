@@ -626,11 +626,19 @@ class KeyManagement(commands.Cog):
         self.bot.loop.create_task(self.check_expired_keys())
     
     async def check_expired_keys(self):
-        """Background task to check and remove expired premium roles."""
+        """Background task to check and remove expired premium roles and synchronize database."""
         await self.bot.wait_until_ready()
         
         while not self.bot.is_closed():
             try:
+                # Sync any new keys to database
+                try:
+                    from utils.sync_keys import sync_db_to_json
+                    sync_db_to_json()
+                    logger.info("Database synchronized during scheduled check")
+                except Exception as e:
+                    logger.error(f"Error syncing keys to database: {e}")
+            
                 # Get all expired keys
                 expired_keys = self.keys_db.get_expired_keys()
                 
@@ -741,8 +749,15 @@ class KeyManagement(commands.Cog):
             except Exception as e:
                 logger.error(f"Error in check_expired_keys task: {e}")
             
-            # Run check every hour
-            await asyncio.sleep(3600)
+            # Sync again after cleanup to ensure web interface stays updated
+            try:
+                from utils.sync_keys import sync_db_to_json
+                sync_db_to_json()
+            except Exception as e:
+                logger.error(f"Error syncing keys to database after cleanup: {e}")
+            
+            # Run check every 10 minutes instead of hourly to ensure timely synchronization
+            await asyncio.sleep(600)
 
 async def setup(bot):
     await bot.add_cog(KeyManagement(bot))
