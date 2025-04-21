@@ -36,6 +36,11 @@ class KeyManagement(commands.Cog):
     @app_commands.default_permissions(manage_roles=True)
     async def generate_key(self, interaction: discord.Interaction, duration: str):
         """Generate a new premium key with the specified duration."""
+        # Importing here to avoid circular imports
+        try:
+            from utils.sync_keys import sync_db_to_json
+        except ImportError:
+            pass
         await interaction.response.defer(ephemeral=True)
         
         # Parse duration string
@@ -65,6 +70,13 @@ class KeyManagement(commands.Cog):
         
         # Store key in database
         self.keys_db.add_key(key, duration_seconds, expiry_date, interaction.user.id, None)
+        
+        # Sync to database
+        try:
+            from utils.sync_keys import sync_db_to_json
+            sync_db_to_json()
+        except Exception as e:
+            logger.error(f"Error syncing to database: {e}")
         
         # Calculate exact expiration time and relative time
         now = datetime.now()
@@ -457,6 +469,13 @@ class KeyManagement(commands.Cog):
                 
                 # Update key with user who redeemed it
                 self.cog.keys_db.update_key_redeemed(key, modal_interaction.user.id)
+                
+                # Sync to database
+                try:
+                    from utils.sync_keys import sync_db_to_json
+                    sync_db_to_json()
+                except Exception as e:
+                    logger.error(f"Error syncing to database: {e}")
                 
                 # Add premium role to user
                 try:

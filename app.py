@@ -70,6 +70,13 @@ def index():
 @app.route('/api/keys', methods=['GET'])
 def get_keys():
     try:
+        # First sync from JSON to database to ensure we have the latest data
+        try:
+            from utils.sync_keys import sync_json_to_db
+            sync_json_to_db()
+        except Exception as e:
+            logger.error(f"Error syncing keys from JSON to database: {e}")
+            
         keys = PremiumKey.query.all()
         return jsonify({
             'success': True,

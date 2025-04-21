@@ -316,6 +316,13 @@ class AdminCommands(commands.Cog):
                             # Update key duration
                             self.view.cog.keys_db.update_key_duration(key, duration_seconds, new_expiry_date)
                             
+                            # Sync to database
+                            try:
+                                from utils.sync_keys import sync_db_to_json
+                                sync_db_to_json()
+                            except Exception as e:
+                                logger.error(f"Error syncing to database: {e}")
+                            
                             # Update user's premium role expiry if the key is redeemed
                             redeemer_id = self.view.key_data.get('user_id_redeemed')
                             creator_id = self.view.key_data.get('user_id_created')
@@ -393,6 +400,13 @@ class AdminCommands(commands.Cog):
                         
                         # Delete key from database
                         self.parent_view.cog.keys_db.delete_key(key)
+                        
+                        # Sync to database
+                        try:
+                            from utils.sync_keys import sync_db_to_json
+                            sync_db_to_json()
+                        except Exception as e:
+                            logger.error(f"Error syncing to database: {e}")
                         
                         # If key was redeemed, remove premium role from user
                         if redeemer_id:
