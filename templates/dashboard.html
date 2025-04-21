@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stats-card {
+        transition: all 0.3s ease;
+    }
+    .stats-card:hover {
+        transform: translateY(-5px);
+    }
+    .key-table th, .key-table td {
+        vertical-align: middle;
+    }
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .status-badge {
+        font-size: 0.75rem;
+        padding: 0.35em 0.65em;
+    }
+    .key-fragment {
+        font-family: monospace;
+        background-color: rgba(0,0,0,0.2);
+        padding: 0.2rem 0.4rem;
+        border-radius: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Premium Key Dashboard</h1>
+
+<div class="row mb-4" id="stats-container">
+    <div class="col-md-3 mb-3">
+        <div class="card stats-card bg-primary text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50">Total Keys</h6>
+                        <h2 class="mb-0" id="total-keys">--</h2>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="bi bi-key-fill"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stats-card bg-success text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50">Active Keys</h6>
+                        <h2 class="mb-0" id="active-keys">--</h2>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="bi bi-check-circle-fill"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stats-card bg-info text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50">Redeemed Keys</h6>
+                        <h2 class="mb-0" id="redeemed-keys">--</h2>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="bi bi-person-check-fill"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card stats-card bg-warning text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title text-white-50">Expired Keys</h6>
+                        <h2 class="mb-0" id="expired-keys">--</h2>
+                    </div>
+                    <div class="fs-1 opacity-50">
+                        <i class="bi bi-alarm-fill"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Premium Keys</h5>
+        <div>
+            <input type="text" id="key-search" class="form-control form-control-sm" placeholder="Search keys...">
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover key-table" id="keys-table">
+                <thead>
+                    <tr>
+                        <th>Key</th>
+                        <th>Status</th>
+                        <th>Created By</th>
+                        <th>Redeemed By</th>
+                        <th>Duration</th>
+                        <th>Expires</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="keys-table-body">
+                    <tr>
+                        <td colspan="7" class="text-center py-4">Loading keys data...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Key Details Modal -->
+<div class="modal fade" id="keyDetailsModal" tabindex="-1" aria-labelledby="keyDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="keyDetailsModalLabel">Key Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="key-details-content">
+                <div class="d-flex justify-content-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Fetch key stats
+    function loadStats() {
+        fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('total-keys').textContent = data.stats.total_keys;
+                    document.getElementById('active-keys').textContent = data.stats.active_keys;
+                    document.getElementById('redeemed-keys').textContent = data.stats.redeemed_keys;
+                    document.getElementById('expired-keys').textContent = data.stats.expired_keys;
+                }
+            })
+            .catch(error => console.error('Error loading stats:', error));
+    }
+
+    // Fetch keys
+    function loadKeys() {
+        fetch('/api/keys')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const tbody = document.getElementById('keys-table-body');
+                    tbody.innerHTML = '';
+                    
+                    if (data.keys.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4">No keys found</td></tr>`;
+                        return;
+                    }
+                    
+                    data.keys.forEach(key => {
+                        const row = document.createElement('tr');
+                        
+                        // Determine status color
+                        let statusBadge = '';
+                        if (key.is_expired) {
+                            statusBadge = '<span class="badge bg-danger status-badge">Expired</span>';
+                        } else if (key.is_redeemed) {
+                            statusBadge = '<span class="badge bg-success status-badge">Active</span>';
+                        } else {
+                            statusBadge = '<span class="badge bg-warning status-badge">Unused</span>';
+                        }
+                        
+                        // Format the key fragment
+                        const keyFragment = key.key.substring(0, 8) + '...' + key.key.substring(key.key.length - 8);
+                        
+                        // Format created_by and redeemed_by
+                        const createdBy = key.user_id_created ? `User ID: ${key.user_id_created}` : 'Unknown';
+                        const redeemedBy = key.user_id_redeemed ? `User ID: ${key.user_id_redeemed}` : 'Not redeemed';
+                        
+                        // Format dates
+                        const expiryDate = new Date(key.expiry_date);
+                        const formattedExpiry = expiryDate.toLocaleString();
+                        
+                        row.innerHTML = `
+                            <td><span class="key-fragment">${keyFragment}</span></td>
+                            <td>${statusBadge}</td>
+                            <td>${createdBy}</td>
+                            <td>${redeemedBy}</td>
+                            <td>${key.duration_str}</td>
+                            <td>${formattedExpiry}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary view-key" data-key-id="${key.key}">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </td>
+                        `;
+                        
+                        tbody.appendChild(row);
+                    });
+                    
+                    // Add event listeners to view buttons
+                    document.querySelectorAll('.view-key').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const keyId = this.getAttribute('data-key-id');
+                            showKeyDetails(keyId);
+                        });
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading keys:', error);
+                document.getElementById('keys-table-body').innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center py-4 text-danger">
+                            Error loading keys. Please try again later.
+                        </td>
+                    </tr>
+                `;
+            });
+    }
+
+    // Show key details in modal
+    function showKeyDetails(keyId) {
+        const modal = new bootstrap.Modal(document.getElementById('keyDetailsModal'));
+        modal.show();
+        
+        const contentDiv = document.getElementById('key-details-content');
+        contentDiv.innerHTML = `
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        `;
+        
+        fetch(`/api/keys/${keyId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const key = data.key;
+                    const createdDate = new Date(key.created_at).toLocaleString();
+                    const expiryDate = new Date(key.expiry_date).toLocaleString();
+                    
+                    let statusBadge = '';
+                    if (key.is_expired) {
+                        statusBadge = '<span class="badge bg-danger">Expired</span>';
+                    } else if (key.is_redeemed) {
+                        statusBadge = '<span class="badge bg-success">Active</span>';
+                    } else {
+                        statusBadge = '<span class="badge bg-warning">Unused</span>';
+                    }
+                    
+                    contentDiv.innerHTML = `
+                        <div class="card mb-3">
+                            <div class="card-header bg-dark d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">Key Information</h5>
+                                ${statusBadge}
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="fw-bold">Key:</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control font-monospace" value="${key.key}" readonly>
+                                        <button class="btn btn-outline-secondary copy-key" type="button" data-key="${key.key}">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <p><span class="fw-bold">Created By:</span> ${key.user_id_created || 'Unknown'}</p>
+                                        <p><span class="fw-bold">Created At:</span> ${createdDate}</p>
+                                        <p><span class="fw-bold">Duration:</span> ${key.duration_str}</p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <p><span class="fw-bold">Redeemed By:</span> ${key.user_id_redeemed || 'Not redeemed'}</p>
+                                        <p><span class="fw-bold">Expires At:</span> ${expiryDate}</p>
+                                        <p><span class="fw-bold">Status:</span> ${statusBadge}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Add copy functionality
+                    document.querySelector('.copy-key').addEventListener('click', function() {
+                        const keyValue = this.getAttribute('data-key');
+                        navigator.clipboard.writeText(keyValue).then(() => {
+                            this.innerHTML = '<i class="bi bi-check"></i>';
+                            setTimeout(() => {
+                                this.innerHTML = '<i class="bi bi-clipboard"></i>';
+                            }, 2000);
+                        });
+                    });
+                } else {
+                    contentDiv.innerHTML = `
+                        <div class="alert alert-danger">
+                            Error loading key details: ${data.error || 'Unknown error'}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching key details:', error);
+                contentDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        Failed to load key details. Please try again later.
+                    </div>
+                `;
+            });
+    }
+
+    // Search functionality
+    document.getElementById('key-search').addEventListener('input', function() {
+        const searchTerm = this.value.toLowerCase();
+        const rows = document.querySelectorAll('#keys-table-body tr');
+        
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(searchTerm) ? '' : 'none';
+        });
+    });
+
+    // Load data when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        loadStats();
+        loadKeys();
+        
+        // Refresh data every 30 seconds
+        setInterval(() => {
+            loadStats();
+            loadKeys();
+        }, 30000);
+    });
+</script>
+{% endblock %}
